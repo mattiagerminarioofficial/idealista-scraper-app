@@ -1,0 +1,116 @@
+name: Idealista Scrape
+
+on:
+  workflow_dispatch:
+    inputs:
+      zona:
+        description: 'Zona (es. milano, roma, milano-provincia)'
+        required: false
+        type: string
+      tipo_immobile:
+        description: 'Tipo immobile'
+        required: false
+        default: 'case'
+        type: choice
+        options:
+          - case
+          - appartamenti
+          - ville
+          - attici
+          - rustici
+          - garage
+          - terreni
+          - uffici
+          - locali
+      prezzo_min:
+        description: 'Prezzo minimo (opzionale)'
+        required: false
+        type: string
+      prezzo_max:
+        description: 'Prezzo massimo (opzionale)'
+        required: false
+        type: string
+      solo_aste:
+        description: 'Solo aste'
+        required: false
+        default: true
+        type: boolean
+      max_pages:
+        description: 'Max pagine risultati'
+        required: false
+        default: '10'
+        type: string
+      search_name:
+        description: 'Nome ricerca'
+        required: true
+        default: 'ricerca'
+        type: string
+      search_url:
+        description: 'URL completo Idealista (sovrascrive zona/tipo/prezzo)'
+        required: false
+        type: string
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scraper
+        env:
+          IDEALISTA_EMAIL: ${{ secrets.IDEALISTA_EMAIL }}
+          IDEALISTA_PASSWORD: ${{ secrets.IDEALISTA_PASSWORD }}
+        run: |
+          ARGS=""
+
+          if [ -n "${{ inputs.search_url }}" ]; then
+            ARGS="$ARGS --search-url '${{ inputs.search_url }}'"
+          elif [ -n "${{ inputs.zona }}" ]; then
+            ARGS="$ARGS --zona ${{ inputs.zona }}"
+            ARGS="$ARGS --tipo ${{ inputs.tipo_immobile }}"
+          else
+            echo "Errore: specificare zona o search_url"
+            exit 1
+          fi
+
+          if [ -n "${{ inputs.prezzo_min }}" ]; then
+            ARGS="$ARGS --prezzo-min ${{ inputs.prezzo_min }}"
+          fi
+
+          if [ -n "${{ inputs.prezzo_max }}" ]; then
+            ARGS="$ARGS --prezzo-max ${{ inputs.prezzo_max }}"
+          fi
+
+          if [ "${{ inputs.solo_aste }}" = "false" ]; then
+            ARGS="$ARGS --no-aste"
+          fi
+
+          ARGS="$ARGS --max-pages ${{ inputs.max_pages }}"
+          ARGS="$ARGS --search-name '${{ inputs.search_name }}'"
+          ARGS="$ARGS --output-dir docs/data"
+
+          eval python scraper/scraper_headless.py $ARGS
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/data/
+          git diff --staged --quiet || git commit -m "Scrape: ${{ inputs.search_name }} $(date +%Y-%m-%d)"
+          git push
