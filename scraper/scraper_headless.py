@@ -60,21 +60,29 @@ class HeadlessIdealistaScraper:
 
     def setup_driver(self):
         chrome_options = Options()
-        chrome_options.add_argument('--headless=new')
+        chrome_options.add_argument('--headless')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-infobars')
         chrome_options.add_argument('--window-size=1920,1080')
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_argument(
             '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-            'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+            'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
         )
         chrome_options.add_argument('--log-level=3')
         chrome_options.add_experimental_option('excludeSwitches', ['enable-automation', 'enable-logging'])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
 
-        self.driver = webdriver.Chrome(options=chrome_options)
+        # Use webdriver-manager for CI compatibility
+        try:
+            from webdriver_manager.chrome import ChromeDriverManager
+            service = Service(ChromeDriverManager().install())
+            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+        except ImportError:
+            self.driver = webdriver.Chrome(options=chrome_options)
+
         self.driver.execute_cdp_cmd(
             'Page.addScriptToEvaluateOnNewDocument',
             {'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'}
@@ -146,7 +154,12 @@ class HeadlessIdealistaScraper:
             return True
 
         except Exception as e:
-            print(f"[ERROR] Login fallito: {str(e)}")
+            print(f"[ERROR] Login fallito: {str(e)[:200]}")
+            try:
+                print(f"[DEBUG] Current URL: {self.driver.current_url}")
+                print(f"[DEBUG] Page title: {self.driver.title}")
+            except Exception:
+                print("[DEBUG] Could not get page info")
             return False
 
     def _has_captcha(self):
