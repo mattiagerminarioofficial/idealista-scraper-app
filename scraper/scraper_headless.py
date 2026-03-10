@@ -109,37 +109,119 @@ class HeadlessIdealistaScraper:
     #  LOGIN
     # ──────────────────────────────────────────────
 
+    def _save_debug_screenshot(self, name="debug"):
+        """Save screenshot for CI debugging."""
+        try:
+            screenshot_path = self.output_dir / f"{name}.png"
+            self.driver.save_screenshot(str(screenshot_path))
+            print(f"[DEBUG] Screenshot salvato: {screenshot_path}")
+        except Exception:
+            pass
+
+    def _dump_page_info(self):
+        """Print page debug info."""
+        try:
+            print(f"[DEBUG] URL: {self.driver.current_url}")
+            print(f"[DEBUG] Title: {self.driver.title}")
+            # Print all input elements found
+            inputs = self.driver.find_elements(By.CSS_SELECTOR, "input")
+            print(f"[DEBUG] Input elements found: {len(inputs)}")
+            for inp in inputs[:10]:
+                try:
+                    itype = inp.get_attribute('type') or '?'
+                    iname = inp.get_attribute('name') or '?'
+                    iid = inp.get_attribute('id') or '?'
+                    print(f"[DEBUG]   <input type='{itype}' name='{iname}' id='{iid}'>")
+                except Exception:
+                    pass
+            # Check for iframes
+            iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+            print(f"[DEBUG] Iframes found: {len(iframes)}")
+        except Exception as e:
+            print(f"[DEBUG] Page info error: {str(e)[:100]}")
+
     def login(self):
         print(f"[..] Login su {self.base_url}...")
         self.driver.get(f"{self.base_url}/login")
-        time.sleep(3)
+        time.sleep(5)
         self.handle_cookie_consent()
-        time.sleep(2)
+        time.sleep(3)
+
+        # Debug: cosa vede il browser?
+        self._save_debug_screenshot("01_login_page")
+        self._dump_page_info()
 
         try:
-            email_input = self.wait.until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR,
-                    "input[type='email'], input[name='email'], #email"
-                ))
-            )
+            # Try multiple selectors for email input
+            email_selectors = [
+                "input[type='email']",
+                "input[name='email']",
+                "#email",
+                "input[id*='email']",
+                "input[placeholder*='email']",
+                "input[placeholder*='Email']",
+                "input[autocomplete='email']",
+                "input[autocomplete='username']",
+                "form input[type='text']:first-of-type",
+            ]
+
+            email_input = None
+            for selector in email_selectors:
+                try:
+                    email_input = WebDriverWait(self.driver, 5).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                    )
+                    print(f"[OK] Email input trovato con: {selector}")
+                    break
+                except TimeoutException:
+                    continue
+
+            if not email_input:
+                # Maybe it's inside an iframe?
+                iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+                for iframe in iframes:
+                    try:
+                        self.driver.switch_to.frame(iframe)
+                        email_input = WebDriverWait(self.driver, 3).until(
+                            EC.element_to_be_clickable((By.CSS_SELECTOR,
+                                "input[type='email'], input[name='email'], input[type='text']"
+                            ))
+                        )
+                        print("[OK] Email input trovato dentro iframe")
+                        break
+                    except (TimeoutException, Exception):
+                        self.driver.switch_to.default_content()
+
+            if not email_input:
+                print("[ERROR] Campo email non trovato con nessun selettore")
+                self._save_debug_screenshot("02_no_email_field")
+                return False
+
             email_input.clear()
             email_input.send_keys(self.email)
             time.sleep(random.uniform(0.5, 1.5))
 
-            password_input = self.wait.until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='password']"))
+            password_input = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR,
+                    "input[type='password'], input[name='password']"
+                ))
             )
             password_input.clear()
             password_input.send_keys(self.password)
             time.sleep(random.uniform(0.5, 1.5))
 
-            login_btn = self.wait.until(
+            self._save_debug_screenshot("03_before_submit")
+
+            login_btn = WebDriverWait(self.driver, 10).until(
                 EC.element_to_be_clickable((By.CSS_SELECTOR,
-                    "button[type='submit'], input[type='submit']"
+                    "button[type='submit'], input[type='submit'], "
+                    "button[class*='submit'], button[class*='login']"
                 ))
             )
             login_btn.click()
             time.sleep(5)
+
+            self._save_debug_screenshot("04_after_submit")
 
             # CAPTCHA check
             if self._has_captcha():
@@ -148,6 +230,7 @@ class HeadlessIdealistaScraper:
                 time.sleep(3)
                 if self._has_captcha():
                     print("[ERROR] CAPTCHA persistente al login. Uscita.")
+                    self._save_debug_screenshot("05_captcha")
                     return False
 
             print("[OK] Login effettuato")
@@ -155,11 +238,8 @@ class HeadlessIdealistaScraper:
 
         except Exception as e:
             print(f"[ERROR] Login fallito: {str(e)[:200]}")
-            try:
-                print(f"[DEBUG] Current URL: {self.driver.current_url}")
-                print(f"[DEBUG] Page title: {self.driver.title}")
-            except Exception:
-                print("[DEBUG] Could not get page info")
+            self._save_debug_screenshot("02_login_error")
+            self._dump_page_info()
             return False
 
     def _has_captcha(self):

@@ -105,10 +105,21 @@ jobs:
 
           eval python scraper/scraper_headless.py $ARGS
 
+      - name: Upload debug screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: docs/data/*.png
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: Commit results
+        if: success()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/data/
+          # Only commit JSON files, not debug screenshots
+          git add docs/data/*.json
           git diff --staged --quiet || git commit -m "Scrape: ${{ inputs.search_name }} $(date +%Y-%m-%d)"
           git push
